@@ -79,8 +79,11 @@ export default {
         receivedAt: new Date().toISOString(),
         source: "Twelve Data"
       }, 200, { "Cache-Control": "no-store" });
-    } catch {
-      return json({ error: "Market data connection failed" }, 502);
+    } catch (error) {
+      return json({
+        error: "Market data connection failed",
+        details: error instanceof Error ? error.message : "Unknown fetch or parsing error"
+      }, 502);
     }
   }
 };
