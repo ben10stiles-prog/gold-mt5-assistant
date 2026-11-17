@@ -1,4 +1,5 @@
 const APP_ORIGIN = "https://ben10stiles-prog.github.io";
+const BUILD_ID = "gold-desk-diagnostic-2026-11-17-1";
 
 function json(data, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(data), {
@@ -47,7 +48,8 @@ export default {
       return json({
         service: "Gold Desk API",
         endpoint: "/price",
-        status: "ready"
+        status: "ready",
+        build: BUILD_ID
       });
     }
 
@@ -66,9 +68,15 @@ export default {
       const data = await response.json();
 
       if (!response.ok || data.status !== "ok") {
+        console.error("Twelve Data returned an error", { httpStatus: response.status, status: data.status || null, message: data.message || null, code: data.code || null });
         return json({
           error: "Market data request failed",
-          details: data.message || data.status || "Unknown upstream response"
+          provider: "Twelve Data",
+          providerHttpStatus: response.status,
+          providerStatus: data.status || null,
+          providerCode: data.code || null,
+          details: data.message || "Provider returned an unsuccessful response",
+          build: BUILD_ID
         }, 502);
       }
 
@@ -82,7 +90,9 @@ export default {
     } catch (error) {
       return json({
         error: "Market data connection failed",
-        details: error instanceof Error ? error.message : "Unknown fetch or parsing error"
+        details: error instanceof Error ? error.message : "Unknown fetch or parsing error",
+        errorName: error instanceof Error ? error.name : "UnknownError",
+        build: BUILD_ID
       }, 502);
     }
   }
