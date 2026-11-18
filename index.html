@@ -28,9 +28,13 @@
 </section>
 <section class="view" id="backtest">
 <div class="card"><div class="eyebrow">HISTORICAL STRATEGY TEST</div><h2>GD-MTF-1.0 backtest</h2>
-<p class="hint">Upload one-minute OHLC candles as CSV. Required columns: datetime, open, high, low, close. Use at least 2,400 rows. MT5 exports are suitable after checking timestamps and timezone.</p>
+<p class="hint">Run a one-tap test using the latest available one-minute XAU/USD history from the Twelve Data connection. No CSV or computer required.</p>
+<button id="runAutoBacktest">Fetch history and run test</button>
+<p class="hint">The provider allows up to 5,000 candles per request. That is only a short recent sample (roughly a few active trading days), useful for checking the pipeline but not enough to prove a strategy has an edge.</p>
+<details><summary>Advanced: upload your own CSV</summary>
 <label>Choose historical CSV file</label><input id="backtestFile" type="file" accept=".csv,text/csv">
-<button id="runBacktest">Run historical test</button><div id="backtestStatus" class="status warning" style="margin-top:10px">No dataset loaded. Nothing has been backtested yet.</div>
+<button id="runBacktest">Run uploaded-data test</button></details>
+<div id="backtestStatus" class="status warning" style="margin-top:10px">No dataset loaded. Nothing has been backtested yet.</div>
 <div id="backtestResults"></div></div>
 <div class="card"><div class="eyebrow">TESTING RULES</div><p class="hint">The test uses the existing GD-MTF-1.0 signal rules without tuning. Entry is the signal candle close; exits begin on the next candle. If stop and target are both touched in one candle, the stop is counted first. Spread, commission, slippage and swap are excluded, so results are optimistic and are not live-trading performance.</p><p class="hint">Use a large, representative dataset and keep a separate out-of-sample period. A few days of data is not enough to establish an edge.</p></div>
 </section>
@@ -79,6 +83,16 @@ $('testNotifications').onclick=async()=>{
     $('notificationResult').textContent='Telegram: '+state(d.telegram)+(data.error?' · '+data.error:'');
   }catch(e){$('notificationResult').textContent='Test request failed. Check the Worker deployment and try again.'}
   finally{$('alertTestSecret').value='';button.disabled=false;refreshNotificationStatus()}
+};
+$('runAutoBacktest').onclick=async()=>{
+  const button=$('runAutoBacktest');button.disabled=true;$('backtestStatus').textContent='Fetching historical XAU/USD candles and running the test…';$('backtestStatus').className='status warning';$('backtestResults').innerHTML='';
+  try{
+    const response=await fetch(API_BASE+'/backtest/automatic',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+    const data=await response.json();if(!response.ok)throw new Error(data.error||'Automatic backtest failed');
+    const s=data.summary;$('backtestStatus').textContent='Completed · '+data.period.from+' to '+data.period.to+' · '+data.bars+' one-minute candles';$('backtestStatus').className='status good';
+    $('backtestResults').innerHTML='<div class="grid" style="margin-top:12px">'+[['Signals',s.signals],['Closed trades',s.closed],['Win rate',s.winRate===null?'—':s.winRate+'%'],['Net result',s.totalR+'R'],['Expectancy',s.expectancyR===null?'—':s.expectancyR+'R'],['Max drawdown',s.maxDrawdownR+'R'],['Profit factor',s.profitFactor===null?'—':s.profitFactor],['Still open',s.open]].map(x=>'<div class="metric"><span class="muted">'+x[0]+'</span><b>'+x[1]+'</b></div>').join('')+'</div><h3>By session</h3><table><tr><th>Session</th><th>Trades</th><th>Win rate</th><th>Net R</th></tr>'+Object.entries(data.sessions).map(([k,v])=>'<tr><td>'+k+'</td><td>'+v.trades+'</td><td>'+(v.winRate===null?'—':v.winRate+'%')+'</td><td>'+v.totalR+'</td></tr>').join('')+'</table><p class="hint">Source: '+data.dataSource+'. '+data.historyNote+'</p><p class="hint">Costs excluded: '+data.assumptions.costs+'. Results are historical simulations, not evidence of future profitability.</p>';
+  }catch(e){$('backtestStatus').textContent=e.message;$('backtestStatus').className='status bad'}
+  finally{button.disabled=false}
 };
 refreshNotificationStatus();
 </script></body></html>
