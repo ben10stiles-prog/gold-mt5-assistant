@@ -108,9 +108,9 @@ export function sendTradeNotifications(env, alert) {
     `Take profit: ${alert.takeProfit}`,
     `Risk/reward: ${alert.riskReward || "Not supplied"}`,
     `Reason: ${alert.reason || "See Gold Desk analysis"}`,
-    `Signal time: ${alert.timestamp || new Date().toISOString()}`,
-    "",
-    "Research alert only. Confirm the quote and risk independently; no order has been placed."
+    `Signal time: ${alert.signalTime || alert.timestamp || new Date().toISOString()}`,
+    alert.warning || "Research alert only. Confirm the quote and risk independently; no order has been placed.",
+    "No order has been placed."
   ].join("\n");
 
   return deliver(env, `GOLD DESK — ${String(alert.direction).toUpperCase()} SETUP`, message);
