@@ -103,7 +103,8 @@ export function sendTradeNotifications(env, alert) {
   const message = [
     `Instrument: ${alert.symbol || "XAU/USD"}`,
     `Direction: ${alert.direction}`,
-    `Entry: ${alert.entry}`,
+    `Indicative entry: ${alert.entry}`,
+    alert.entryZone ? `Entry zone: ${alert.entryZone[0]}–${alert.entryZone[1]}` : null,
     `Stop loss: ${alert.stopLoss}`,
     `Take profit: ${alert.takeProfit}`,
     `Risk/reward: ${alert.riskReward || "Not supplied"}`,
@@ -111,7 +112,7 @@ export function sendTradeNotifications(env, alert) {
     `Signal time: ${alert.signalTime || alert.timestamp || new Date().toISOString()}`,
     alert.warning || "Research alert only. Confirm the quote and risk independently; no order has been placed.",
     "No order has been placed."
-  ].join("\n");
+  ].filter(Boolean).join("\n");
 
   return deliver(env, `GOLD DESK — ${String(alert.direction).toUpperCase()} SETUP`, message);
 }
