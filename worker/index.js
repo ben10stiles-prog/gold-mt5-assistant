@@ -45,6 +45,53 @@ export default {
 
     const url = new URL(request.url);
 
+    if (url.pathname === "/backtest/automatic" && request.method === "POST") {
+      if (!env.TWELVE_DATA_API_KEY) {
+        return json({ error: "Twelve Data API secret is not configured" }, 503, { "Cache-Control": "no-store" });
+      }
+
+      try {
+        const cache = caches.default;
+        const cacheKey = new Request("https://gold-desk-api.ben10stiles.workers.dev/__gold-desk-cache/backtest-history-1min-v1");
+        let data = cache ? await cache.match(cacheKey) : null;
+
+        if (data) {
+          data = await data.json();
+        } else {
+          const upstream = new URL("https://api.twelvedata.com/time_series");
+          upstream.searchParams.set("symbol", "XAU/USD");
+          upstream.searchParams.set("interval", "1min");
+          upstream.searchParams.set("outputsize", "5000");
+          upstream.searchParams.set("order", "ASC");
+          upstream.searchParams.set("timezone", "UTC");
+          upstream.searchParams.set("apikey", env.TWELVE_DATA_API_KEY);
+
+          const response = await fetch(upstream.toString());
+          data = await response.json();
+          if (!response.ok || data.status !== "ok" || !Array.isArray(data.values)) {
+            const message = data.message || "Twelve Data could not return historical XAU/USD candles";
+            return json({ error: message, provider: "Twelve Data", providerCode: data.code || null }, 502, { "Cache-Control": "no-store" });
+          }
+
+          if (cache) {
+            await cache.put(cacheKey, json(data, 200, { "Cache-Control": "public, max-age=3600" }), { expirationTtl: 3600 });
+          }
+        }
+
+        const candles = data.values.map(c => ({
+          datetime: c.datetime,
+          open: c.open,
+          high: c.high,
+          low: c.low,
+          close: c.close
+        }));
+        const result = runBacktest(candles);
+        return json({ ...result, dataSource: "Twelve Data XAU/USD spot", cachedHistory: Boolean(cache), historyNote: "Up to 5,000 latest one-minute bars. This is a short diagnostic sample, not enough on its own to establish a durable trading edge." }, 200, { "Cache-Control": "no-store" });
+      } catch (error) {
+        return json({ error: error instanceof Error ? error.message : "Automatic backtest failed" }, 400, { "Cache-Control": "no-store" });
+      }
+    }
+
     if (url.pathname === "/backtest" && request.method === "POST") {
       try {
         const body = await request.json();
