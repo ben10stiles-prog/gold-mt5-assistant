@@ -284,7 +284,9 @@ async function runScheduledScan(env) {
       if (!alreadySent && getNotificationStatus(env).telegram) {
         const delivery = await sendTradeNotifications(env, analysis);
         result.notifications.telegram = delivery.telegram.sent ? "sent" : "failed";
-        await cache.put(dedupeKey, new Response("sent"), { expirationTtl: 86400 });
+        if (delivery.telegram.sent) {
+          await cache.put(dedupeKey, new Response("sent"), { expirationTtl: 86400 });
+        }
       } else if (alreadySent) {
         result.notifications.telegram = "duplicate_suppressed";
       } else {
