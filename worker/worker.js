@@ -1,5 +1,5 @@
 const APP_ORIGIN = "https://ben10stiles-prog.github.io";
-const BUILD_ID = "gold-desk-diagnostic-2026-11-17-1";
+const BUILD_ID = "gold-desk-live-feed-bootstrap-2026-11-18-1";
 
 function json(data, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(data), {
@@ -44,13 +44,18 @@ export default {
       return json({ error: "Method not allowed" }, 405);
     }
 
-    if (url.pathname !== "/price") {
+    if (url.pathname === "/" || url.pathname === "/health") {
       return json({
         service: "Gold Desk API",
         endpoint: "/price",
         status: "ready",
-        build: BUILD_ID
-      });
+        build: BUILD_ID,
+        marketData: "provider-check-required"
+      }, 200, { "Cache-Control": "no-store" });
+    }
+
+    if (url.pathname !== "/price") {
+      return json({ error: "Not found", build: BUILD_ID }, 404);
     }
 
     if (!env.TWELVE_DATA_API_KEY) {
