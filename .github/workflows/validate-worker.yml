@@ -1,0 +1,29 @@
+name: Validate Gold Desk Worker
+
+on:
+  pull_request:
+    paths:
+      - "worker/**"
+      - ".github/workflows/validate-worker.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check Worker syntax
+        run: |
+          node --check worker/index.js
+          node --check worker/signal-engine.js
+          node --check worker/notifications.js
+      - name: Run signal engine tests
+        run: npm test --prefix worker
