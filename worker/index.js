@@ -1,7 +1,7 @@
 import { getNotificationStatus, sendTestNotifications } from "./notifications.js";
 
 const APP_ORIGIN = "https://ben10stiles-prog.github.io";
-const BUILD_ID = "gold-desk-dual-notifications-2026-11-18-1";
+const BUILD_ID = "gold-desk-utc-market-validation-2026-11-18-1";
 
 function json(data, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(data), {
@@ -110,6 +110,7 @@ export default {
     upstream.searchParams.set("symbol", "XAU/USD");
     upstream.searchParams.set("interval", "1min");
     upstream.searchParams.set("outputsize", "2");
+    upstream.searchParams.set("timezone", "UTC");
     upstream.searchParams.set("apikey", env.TWELVE_DATA_API_KEY);
 
     try {
@@ -134,12 +135,44 @@ export default {
         }, 502);
       }
 
+      const receivedAt = new Date();
+      const values = Array.isArray(data.values) ? data.values : [];
+      const latest = values[0] || null;
+      const latestTime = latest?.datetime
+        ? new Date(`${latest.datetime.replace(" ", "T")}Z`)
+        : null;
+
+      if (!latestTime || Number.isNaN(latestTime.getTime())) {
+        return json({
+          error: "Market data timestamp is missing or invalid",
+          provider: "Twelve Data",
+          build: BUILD_ID
+        }, 502, { "Cache-Control": "no-store" });
+      }
+
+      const candleAgeSeconds = Math.round((receivedAt.getTime() - latestTime.getTime()) / 1000);
+      if (candleAgeSeconds < -120) {
+        return json({
+          error: "Market data timestamp is ahead of server time",
+          provider: "Twelve Data",
+          latestCandleAt: latestTime.toISOString(),
+          receivedAt: receivedAt.toISOString(),
+          clockSkewSeconds: -candleAgeSeconds,
+          build: BUILD_ID
+        }, 502, { "Cache-Control": "no-store" });
+      }
+
       return json({
         symbol: data.meta?.symbol || "XAU/USD",
         interval: data.meta?.interval || "1min",
-        values: data.values || [],
-        receivedAt: new Date().toISOString(),
-        source: "Twelve Data"
+        timezone: "UTC",
+        values,
+        latestCandleAt: latestTime.toISOString(),
+        receivedAt: receivedAt.toISOString(),
+        candleAgeSeconds,
+        isFresh: candleAgeSeconds <= 180,
+        source: "Twelve Data",
+        build: BUILD_ID
       }, 200, { "Cache-Control": "no-store" });
     } catch (error) {
       return json({
