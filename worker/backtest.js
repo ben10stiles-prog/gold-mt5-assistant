@@ -21,7 +21,7 @@ function validCandles(input) {
 }
 
 function sessionOf(iso) {
-  const hour = new Date(iso.replace(" ","T")+"Z").getUTCHours();
+  const hour = new Date(iso).getUTCHours();
   if (hour >= 0 && hour < 7) return "Asia";
   if (hour >= 7 && hour < 13) return "London";
   if (hour >= 13 && hour < 17) return "New York";
