@@ -1,7 +1,6 @@
 function configured(env) {
   return {
-    telegram: Boolean(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID),
-    iphone: Boolean(env.NTFY_TOPIC)
+    telegram: Boolean(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID)
   };
 }
 
@@ -37,54 +36,16 @@ async function sendTelegram(env, text) {
   };
 }
 
-async function sendIphonePush(env, title, message) {
-  if (!env.NTFY_TOPIC) {
-    return { configured: false, sent: false };
+async function deliverTelegram(env, title, message) {
+  try {
+    return await sendTelegram(env, `${title}\n\n${message}`);
+  } catch {
+    return {
+      configured: Boolean(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID),
+      sent: false,
+      reason: "delivery_error"
+    };
   }
-
-  if (!/^[A-Za-z0-9_-]{16,64}$/.test(env.NTFY_TOPIC)) {
-    return { configured: true, sent: false, reason: "invalid_topic_format" };
-  }
-
-  const headers = {
-    "Title": title,
-    "Priority": "4",
-    "Tags": "chart_with_upwards_trend",
-    "Content-Type": "text/plain; charset=utf-8"
-  };
-
-  if (env.NTFY_ACCESS_TOKEN) {
-    headers.Authorization = `Bearer ${env.NTFY_ACCESS_TOKEN}`;
-  }
-
-  const response = await fetch(`https://ntfy.sh/${encodeURIComponent(env.NTFY_TOPIC)}`, {
-    method: "POST",
-    headers,
-    body: message
-  });
-
-  return {
-    configured: true,
-    sent: response.ok,
-    providerStatus: response.status
-  };
-}
-
-async function deliver(env, title, message) {
-  const results = await Promise.allSettled([
-    sendTelegram(env, `${title}\n\n${message}`),
-    sendIphonePush(env, title, message)
-  ]);
-
-  const telegram = results[0].status === "fulfilled"
-    ? results[0].value
-    : { configured: Boolean(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID), sent: false, reason: "delivery_error" };
-
-  const iphone = results[1].status === "fulfilled"
-    ? results[1].value
-    : { configured: Boolean(env.NTFY_TOPIC), sent: false, reason: "delivery_error" };
-
-  return { telegram, iphone };
 }
 
 export function getNotificationStatus(env) {
@@ -92,10 +53,10 @@ export function getNotificationStatus(env) {
 }
 
 export function sendTestNotifications(env) {
-  return deliver(
+  return deliverTelegram(
     env,
     "GOLD DESK — NOTIFICATION TEST",
-    "Your Gold Desk notification connection is being tested. This is a test only, not a trade signal."
+    "Your Gold Desk Telegram connection is being tested. This is a test only, not a trade signal."
   );
 }
 
@@ -114,5 +75,5 @@ export function sendTradeNotifications(env, alert) {
     "No order has been placed."
   ].filter(Boolean).join("\n");
 
-  return deliver(env, `GOLD DESK — ${String(alert.direction).toUpperCase()} SETUP`, message);
+  return deliverTelegram(env, `GOLD DESK — ${String(alert.direction).toUpperCase()} SETUP`, message);
 }
