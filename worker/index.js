@@ -1,7 +1,7 @@
 import { getNotificationStatus, sendTestNotifications } from "./notifications.js";
 
 const APP_ORIGIN = "https://ben10stiles-prog.github.io";
-const BUILD_ID = "gold-desk-utc-market-validation-2026-11-18-1";
+const BUILD_ID = "gold-desk-price-cache-2026-11-18-1";
 
 function json(data, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(data), {
@@ -102,6 +102,31 @@ export default {
       return json({ error: "Not found", build: BUILD_ID }, 404);
     }
 
+    // Reuse a successful response for 55 seconds to avoid exhausting
+    // Twelve Data's 8-credit-per-minute Basic allowance on repeated refreshes.
+    const cache = caches.default;
+    const cacheKey = new Request(new URL("/__gold-desk-cache/price-v1", url.origin).toString());
+
+    if (cache) {
+      const cached = await cache.match(cacheKey);
+      if (cached) {
+        const cachedData = await cached.json();
+        const latestTime = cachedData.latestCandleAt ? new Date(cachedData.latestCandleAt) : null;
+        const candleAgeSeconds = latestTime && !Number.isNaN(latestTime.getTime())
+          ? Math.max(0, Math.round((Date.now() - latestTime.getTime()) / 1000))
+          : null;
+        return json({
+          ...cachedData,
+          candleAgeSeconds,
+          isFresh: candleAgeSeconds !== null && candleAgeSeconds <= 180,
+          cache: "HIT"
+        }, 200, {
+          "Cache-Control": "no-store",
+          "X-GoldDesk-Cache": "HIT"
+        });
+      }
+    }
+
     if (!env.TWELVE_DATA_API_KEY) {
       return json({ error: "API secret not configured", build: BUILD_ID }, 500);
     }
@@ -124,15 +149,19 @@ export default {
           message: data.message || null,
           code: data.code || null
         });
+        const rateLimited = response.status === 429 || data.code === 429;
         return json({
-          error: "Market data request failed",
+          error: rateLimited ? "Market data rate limit reached" : "Market data request failed",
           provider: "Twelve Data",
           providerHttpStatus: response.status,
           providerStatus: data.status || null,
           providerCode: data.code || null,
           details: data.message || "Provider returned an unsuccessful response",
+          retryAfterSeconds: rateLimited ? 60 : null,
           build: BUILD_ID
-        }, 502);
+        }, 502, rateLimited
+          ? { "Retry-After": "60", "Cache-Control": "no-store" }
+          : { "Cache-Control": "no-store" });
       }
 
       const receivedAt = new Date();
@@ -162,7 +191,7 @@ export default {
         }, 502, { "Cache-Control": "no-store" });
       }
 
-      return json({
+      const payload = {
         symbol: data.meta?.symbol || "XAU/USD",
         interval: data.meta?.interval || "1min",
         timezone: "UTC",
@@ -172,8 +201,20 @@ export default {
         candleAgeSeconds,
         isFresh: candleAgeSeconds <= 180,
         source: "Twelve Data",
+        cache: "MISS",
         build: BUILD_ID
-      }, 200, { "Cache-Control": "no-store" });
+      };
+
+      const successResponse = json(payload, 200, {
+        "Cache-Control": "public, max-age=55",
+        "X-GoldDesk-Cache": "MISS"
+      });
+
+      if (cache) {
+        await cache.put(cacheKey, successResponse.clone(), { expirationTtl: 55 });
+      }
+
+      return successResponse;
     } catch (error) {
       return json({
         error: "Market data connection failed",
