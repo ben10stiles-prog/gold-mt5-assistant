@@ -232,7 +232,7 @@ export default {
         build: BUILD_ID
       }, 502);
     }
-  }
+  },
   async scheduled(event, env, ctx) {
     ctx.waitUntil(runScheduledScan(env));
   }
