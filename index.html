@@ -5,7 +5,7 @@
 </style></head><body>
 <header><div><h1>GOLD DESK <span style="color:#fff">/</span> AI LAB</h1><div class="sub">XAUUSD scalping research · paper mode</div></div><span class="pill">DEMO ONLY</span></header>
 <div class="notice">Educational paper-trading prototype. No broker connection, live market feed, AI-generated signals, trade execution or background push alerts. Never use this page to place live trades.</div>
-<nav class="tabs"><button class="active" data-view="home">Overview</button><button data-view="scanner">Scalp scan</button><button data-view="journal">Journal</button><button data-view="settings">Settings</button></nav>
+<nav class="tabs"><button class="active" data-view="home">Overview</button><button data-view="scanner">Scalp scan</button><button data-view="journal">Journal</button><button data-view="backtest">Backtest</button><button data-view="settings">Settings</button></nav>
 <section class="view active" id="home">
 <div class="card"><div class="eyebrow">YOUR MONITORING PROFILE</div><div class="hero">XAUUSD</div><div class="grid"><div class="metric"><span class="muted">Style</span><b>Scalping</b></div><div class="metric"><span class="muted">Monitoring</span><b>Market hours</b></div><div class="metric"><span class="muted">Alert filter</span><b>High quality</b></div><div class="metric"><span class="muted">Mode</span><b class="good">Paper only</b></div></div></div>
 <div class="card"><div class="eyebrow">PAPER SCANNER</div><h2>Manual market check</h2><p class="hint">Use your MT5 chart to assess conditions. This page cannot read the chart or fetch quotes automatically.</p><label>Current XAUUSD quote (optional, USD)</label><input id="homeprice" type="number" step=".01" placeholder="Enter quote from MT5"><div class="grid"><div><label>Chart timeframe</label><select id="homeframe"><option>M5</option><option selected>M15</option><option>H1</option></select></div><div><label>Market session</label><select id="session"><option>London</option><option>New York</option><option>Overlap</option><option>Outside main sessions</option></select></div></div><button onclick="go('scanner')">Open scalp checklist</button></div>
@@ -25,6 +25,14 @@
 </section>
 <section class="view" id="journal">
 <div class="card"><div class="eyebrow">PAPER JOURNAL</div><h2>Record an observation</h2><label>Observation / setup notes</label><input id="jnotes" placeholder="What did you see?"><div class="grid"><div><label>Timeframe</label><select id="jtf"><option>M5</option><option>M15</option></select></div><div><label>Outcome (later)</label><select id="outcome"><option>Not reviewed</option><option>Worked as expected</option><option>Did not work</option><option>No trade / invalidated</option></select></div></div><button id="saveJournal">Save observation</button><div id="entries"></div><button class="secondary" id="clearJournal">Clear paper journal</button></div>
+</section>
+<section class="view" id="backtest">
+<div class="card"><div class="eyebrow">HISTORICAL STRATEGY TEST</div><h2>GD-MTF-1.0 backtest</h2>
+<p class="hint">Upload one-minute OHLC candles as CSV. Required columns: datetime, open, high, low, close. Use at least 2,400 rows. MT5 exports are suitable after checking timestamps and timezone.</p>
+<label>Choose historical CSV file</label><input id="backtestFile" type="file" accept=".csv,text/csv">
+<button id="runBacktest">Run historical test</button><div id="backtestStatus" class="status warning" style="margin-top:10px">No dataset loaded. Nothing has been backtested yet.</div>
+<div id="backtestResults"></div></div>
+<div class="card"><div class="eyebrow">TESTING RULES</div><p class="hint">The test uses the existing GD-MTF-1.0 signal rules without tuning. Entry is the signal candle close; exits begin on the next candle. If stop and target are both touched in one candle, the stop is counted first. Spread, commission, slippage and swap are excluded, so results are optimistic and are not live-trading performance.</p><p class="hint">Use a large, representative dataset and keep a separate out-of-sample period. A few days of data is not enough to establish an edge.</p></div>
 </section>
 <section class="view" id="settings">
 <div class="card"><div class="eyebrow">YOUR PREFERENCES</div><h2>Monitoring configuration</h2><label>Monitoring window</label><select id="monitor"><option>All day, during market hours</option><option>London and New York sessions only</option></select><label>Trading style</label><select id="style"><option>Scalping – short-term setups</option></select><label>Notification filter</label><select id="filter"><option>Only high-quality setups (strict)</option></select><button id="savePrefs">Save preferences</button><p class="hint" id="prefsSaved">Preferences are stored on this device only.</p></div>
