@@ -1,5 +1,7 @@
+import { getNotificationStatus, sendTestNotifications } from "./notifications.js";
+
 const APP_ORIGIN = "https://ben10stiles-prog.github.io";
-const BUILD_ID = "gold-desk-live-feed-diagnostics-2026-11-18-1";
+const BUILD_ID = "gold-desk-dual-notifications-2026-11-18-1";
 
 function json(data, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(data), {
@@ -7,8 +9,8 @@ function json(data, status = 200, extraHeaders = {}) {
     headers: {
       "Content-Type": "application/json; charset=utf-8",
       "Access-Control-Allow-Origin": APP_ORIGIN,
-      "Access-Control-Allow-Methods": "GET, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type",
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization",
       "Vary": "Origin",
       ...extraHeaders
     }
@@ -27,8 +29,8 @@ export default {
         status: 204,
         headers: {
           "Access-Control-Allow-Origin": APP_ORIGIN,
-          "Access-Control-Allow-Methods": "GET, OPTIONS",
-          "Access-Control-Allow-Headers": "Content-Type",
+          "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type, Authorization",
           "Vary": "Origin"
         }
       });
@@ -40,6 +42,47 @@ export default {
 
     const url = new URL(request.url);
 
+    if (url.pathname === "/notifications/status" && request.method === "GET") {
+      return json({
+        service: "Gold Desk notifications",
+        configured: getNotificationStatus(env),
+        build: BUILD_ID
+      }, 200, { "Cache-Control": "no-store" });
+    }
+
+    if (url.pathname === "/alerts/test" && request.method === "POST") {
+      if (!env.ALERT_TEST_SECRET) {
+        return json({ error: "Notification test is not configured" }, 503);
+      }
+
+      const authorization = request.headers.get("Authorization") || "";
+      if (authorization !== `Bearer ${env.ALERT_TEST_SECRET}`) {
+        return json({ error: "Unauthorized" }, 401);
+      }
+
+      const configured = getNotificationStatus(env);
+      if (!configured.telegram && !configured.iphone) {
+        return json({ error: "No notification channels are configured" }, 503);
+      }
+
+      try {
+        const delivery = await sendTestNotifications(env);
+        const allConfiguredChannelsSent =
+          (!configured.telegram || delivery.telegram.sent) &&
+          (!configured.iphone || delivery.iphone.sent);
+
+        return json({
+          message: allConfiguredChannelsSent
+            ? "Test notification sent"
+            : "One or more notification channels failed",
+          delivery,
+          build: BUILD_ID
+        }, allConfiguredChannelsSent ? 200 : 502, { "Cache-Control": "no-store" });
+      } catch {
+        return json({ error: "Notification delivery failed", build: BUILD_ID }, 502);
+      }
+    }
+
     if (request.method !== "GET") {
       return json({ error: "Method not allowed" }, 405);
     }
@@ -50,7 +93,8 @@ export default {
         endpoint: "/price",
         status: "ready",
         build: BUILD_ID,
-        marketData: "provider-check-required"
+        marketData: "provider-check-required",
+        notifications: getNotificationStatus(env)
       }, 200, { "Cache-Control": "no-store" });
     }
 

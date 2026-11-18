@@ -28,6 +28,7 @@
 </section>
 <section class="view" id="settings">
 <div class="card"><div class="eyebrow">YOUR PREFERENCES</div><h2>Monitoring configuration</h2><label>Monitoring window</label><select id="monitor"><option>All day, during market hours</option><option>London and New York sessions only</option></select><label>Trading style</label><select id="style"><option>Scalping – short-term setups</option></select><label>Notification filter</label><select id="filter"><option>Only high-quality setups (strict)</option></select><button id="savePrefs">Save preferences</button><p class="hint" id="prefsSaved">Preferences are stored on this device only.</p></div>
+<div class="card"><div class="eyebrow">DUAL NOTIFICATION CHANNELS</div><h2>Telegram + iPhone push</h2><div id="notificationStatus" class="status warning">Checking notification setup…</div><label>Temporary test access key</label><input id="alertTestSecret" type="password" autocomplete="off" placeholder="Enter the test key configured in Cloudflare"><button id="testNotifications">Send test to configured channels</button><p id="notificationResult" class="hint">This sends a test message only. It does not create a trade signal. The test key is used for this request only and is not saved.</p><p class="hint">Setup links: <a href="https://t.me/BotFather" target="_blank" rel="noopener" style="color:var(--gold)">Telegram BotFather ↗</a> · <a href="https://ntfy.sh" target="_blank" rel="noopener" style="color:var(--gold)">ntfy ↗</a>. Install the ntfy app on your iPhone and subscribe to your private topic.</p></div>
 <div class="card"><div class="eyebrow">WHAT IS NOT CONNECTED</div><p class="hint">Kudo Trade / MT5 is not connected. No Kudo credentials should be entered here. No live prices, continuous scanning, server-side processing or push notifications are active. To enable genuine background alerts later, a secure market-data provider and hosted backend with push delivery must be configured and tested.</p></div>
 <div class="card"><div class="eyebrow">PRIVACY & SAFETY</div><p class="hint">Journal entries and preferences are stored in this browser's local storage. They may not sync to another device. This app is for educational simulation, not financial advice or a broker service.</p></div>
 </section>
@@ -44,4 +45,32 @@ $('saveJournal').onclick=()=>{let t={notes:$('jnotes').value,tf:$('jtf').value,o
 $('clearJournal').onclick=()=>{if(confirm('Delete all paper journal entries stored on this device?')){localStorage.removeItem('goldDeskV2Journal');draw()}};draw();
 $('savePrefs').onclick=()=>{$('prefsSaved').textContent='Saved on this device: '+$('monitor').value+' · '+$('style').value+' · '+$('filter').value;localStorage.setItem('goldDeskV2Prefs',JSON.stringify({monitor:$('monitor').value,style:$('style').value,filter:$('filter').value}))};
 try{let p=JSON.parse(localStorage.getItem('goldDeskV2Prefs')||'null');if(p){$('monitor').value=p.monitor;$('style').value=p.style;$('filter').value=p.filter}}catch(e){}
+const API_BASE='https://gold-desk-api.ben10stiles.workers.dev';
+async function refreshNotificationStatus(){
+  try{
+    const response=await fetch(API_BASE+'/notifications/status',{cache:'no-store'});
+    const data=await response.json();
+    if(!response.ok) throw new Error('Status unavailable');
+    const c=data.configured||{};
+    $('notificationStatus').textContent='Telegram: '+(c.telegram?'configured':'not configured')+' · iPhone push: '+(c.iphone?'configured':'not configured');
+    $('notificationStatus').className='status '+(c.telegram&&c.iphone?'good':'warning');
+  }catch(e){
+    $('notificationStatus').textContent='Could not reach the notification service yet. It may still need deploying.';
+    $('notificationStatus').className='status warning';
+  }
+}
+$('testNotifications').onclick=async()=>{
+  const secret=$('alertTestSecret').value.trim();
+  if(!secret){$('notificationResult').textContent='Enter the temporary test access key first.';return}
+  const button=$('testNotifications');button.disabled=true;
+  $('notificationResult').textContent='Sending test…';
+  try{
+    const response=await fetch(API_BASE+'/alerts/test',{method:'POST',headers:{'Authorization':'Bearer '+secret,'Content-Type':'application/json'},body:'{}'});
+    const data=await response.json();const d=data.delivery||{};
+    const state=x=>x&&x.sent?'sent':x&&x.configured?'failed':'not configured';
+    $('notificationResult').textContent='Telegram: '+state(d.telegram)+' · iPhone push: '+state(d.iphone)+(data.error?' · '+data.error:'');
+  }catch(e){$('notificationResult').textContent='Test request failed. Check the Worker deployment and try again.'}
+  finally{$('alertTestSecret').value='';button.disabled=false;refreshNotificationStatus()}
+};
+refreshNotificationStatus();
 </script></body></html>
