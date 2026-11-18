@@ -1,7 +1,9 @@
-import { getNotificationStatus, sendTestNotifications } from "./notifications.js";
+import { getNotificationStatus, sendTestNotifications, sendTradeNotifications } from "./notifications.js";
+import { analyseXauusd } from "./signal-engine.js";
 
 const APP_ORIGIN = "https://ben10stiles-prog.github.io";
-const BUILD_ID = "gold-desk-price-cache-2026-11-18-1";
+const BUILD_ID = "gold-desk-live-signals-2026-11-18-1";
+const SIGNAL_CACHE_ORIGIN = "https://gold-desk-api.ben10stiles.workers.dev";
 
 function json(data, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(data), {
@@ -41,6 +43,13 @@ export default {
     }
 
     const url = new URL(request.url);
+
+    if (url.pathname === "/signals/latest" && request.method === "GET") {
+      const key = new Request(`${SIGNAL_CACHE_ORIGIN}/__gold-desk-cache/signals-latest`);
+      const saved = await caches.default.match(key);
+      if (!saved) return json({ status: "NOT_SCANNED", message: "The scheduled scanner has not completed its first run yet.", build: BUILD_ID }, 200, { "Cache-Control": "no-store" });
+      return json(await saved.json(), 200, { "Cache-Control": "no-store" });
+    }
 
     if (url.pathname === "/notifications/status" && request.method === "GET") {
       return json({
@@ -224,4 +233,80 @@ export default {
       }, 502);
     }
   }
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(runScheduledScan(env));
+  }
 };
+
+async function runScheduledScan(env) {
+  const cache = caches.default;
+  const latestKey = new Request(`${SIGNAL_CACHE_ORIGIN}/__gold-desk-cache/signals-latest`);
+  const historyKey = new Request(`${SIGNAL_CACHE_ORIGIN}/__gold-desk-cache/signal-history-v1`);
+
+  try {
+    let market = await cache.match(historyKey);
+    let values;
+    if (market) {
+      const cached = await market.json();
+      values = cached.values;
+    } else {
+      if (!env.TWELVE_DATA_API_KEY) throw new Error("Twelve Data API secret is not configured");
+      const upstream = new URL("https://api.twelvedata.com/time_series");
+      upstream.searchParams.set("symbol", "XAU/USD");
+      upstream.searchParams.set("interval", "1min");
+      upstream.searchParams.set("outputsize", "4000");
+      upstream.searchParams.set("timezone", "UTC");
+      upstream.searchParams.set("apikey", env.TWELVE_DATA_API_KEY);
+      const response = await fetch(upstream.toString());
+      const data = await response.json();
+      if (!response.ok || data.status !== "ok" || !Array.isArray(data.values)) {
+        throw new Error(data.message || `Twelve Data returned HTTP ${response.status}`);
+      }
+      values = data.values;
+      await cache.put(historyKey, new Response(JSON.stringify({ values, fetchedAt: new Date().toISOString() }), {
+        headers: { "Content-Type": "application/json" }
+      }), { expirationTtl: 55 });
+    }
+
+    const analysis = analyseXauusd(values, Date.now());
+    const result = {
+      ...analysis,
+      scannedAt: new Date().toISOString(),
+      dataSource: "Twelve Data XAU/USD spot",
+      executionMode: "ALERTS_ONLY_NO_ORDERS",
+      notifications: { telegram: "not_sent" },
+      build: BUILD_ID
+    };
+
+    if (analysis.status === "CANDIDATE") {
+      const dedupeKey = new Request(`${SIGNAL_CACHE_ORIGIN}/__gold-desk-cache/signal-sent/${encodeURIComponent(analysis.signalId)}`);
+      const alreadySent = await cache.match(dedupeKey);
+      if (!alreadySent && getNotificationStatus(env).telegram) {
+        const delivery = await sendTradeNotifications(env, analysis);
+        result.notifications.telegram = delivery.telegram.sent ? "sent" : "failed";
+        await cache.put(dedupeKey, new Response("sent"), { expirationTtl: 86400 });
+      } else if (alreadySent) {
+        result.notifications.telegram = "duplicate_suppressed";
+      } else {
+        result.notifications.telegram = "not_configured";
+      }
+    }
+
+    await cache.put(latestKey, new Response(JSON.stringify(result), {
+      headers: { "Content-Type": "application/json" }
+    }), { expirationTtl: 3600 });
+  } catch (error) {
+    const failure = {
+      status: "ERROR",
+      reason: "Scheduled scan failed; no signal was generated.",
+      detail: error instanceof Error ? error.message : "Unknown scanner error",
+      scannedAt: new Date().toISOString(),
+      executionMode: "ALERTS_ONLY_NO_ORDERS",
+      build: BUILD_ID
+    };
+    await cache.put(latestKey, new Response(JSON.stringify(failure), {
+      headers: { "Content-Type": "application/json" }
+    }), { expirationTtl: 3600 });
+    console.error("Gold Desk scheduled scan failed", error);
+  }
+}
