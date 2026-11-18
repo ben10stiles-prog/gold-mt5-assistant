@@ -4,3 +4,7 @@ compatibility_date = "2026-11-17"
 
 [triggers]
 crons = ["* * * * *"]
+
+[[kv_namespaces]]
+binding = "KV"
+id = "9bc1e8cd4f7b4d72a853637ff9be5c73"

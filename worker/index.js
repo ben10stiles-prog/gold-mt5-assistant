@@ -2,7 +2,7 @@ import { getNotificationStatus, sendTestNotifications, sendTradeNotifications } 
 import { analyseXauusd } from "./signal-engine.js";
 
 const APP_ORIGIN = "https://ben10stiles-prog.github.io";
-const BUILD_ID = "gold-desk-live-signals-2026-11-18-1";
+const BUILD_ID = "gold-desk-kv-scan-2026-11-18-1";
 const SIGNAL_CACHE_ORIGIN = "https://gold-desk-api.ben10stiles.workers.dev";
 
 function json(data, status = 200, extraHeaders = {}) {
@@ -45,10 +45,10 @@ export default {
     const url = new URL(request.url);
 
     if (url.pathname === "/signals/latest" && request.method === "GET") {
-      const key = new Request(`${SIGNAL_CACHE_ORIGIN}/__gold-desk-cache/signals-latest`);
-      const saved = await caches.default.match(key);
+      if (!env.KV) return json({ status: "CONFIG_ERROR", message: "The GOLD_DESK_SIGNALS KV binding is missing.", build: BUILD_ID }, 503, { "Cache-Control": "no-store" });
+      const saved = await env.KV.get("signals-latest");
       if (!saved) return json({ status: "NOT_SCANNED", message: "The scheduled scanner has not completed its first run yet.", build: BUILD_ID }, 200, { "Cache-Control": "no-store" });
-      return json(await saved.json(), 200, { "Cache-Control": "no-store" });
+      return json(JSON.parse(saved), 200, { "Cache-Control": "no-store" });
     }
 
     if (url.pathname === "/notifications/status" && request.method === "GET") {
@@ -239,16 +239,16 @@ export default {
 };
 
 async function runScheduledScan(env) {
-  const cache = caches.default;
-  const latestKey = new Request(`${SIGNAL_CACHE_ORIGIN}/__gold-desk-cache/signals-latest`);
-  const historyKey = new Request(`${SIGNAL_CACHE_ORIGIN}/__gold-desk-cache/signal-history-v1`);
+  if (!env.KV) {
+    console.error("Gold Desk scheduled scan cannot start: GOLD_DESK_SIGNALS KV binding is missing.");
+    return;
+  }
 
   try {
-    let market = await cache.match(historyKey);
     let values;
-    if (market) {
-      const cached = await market.json();
-      values = cached.values;
+    const cachedHistory = await env.KV.get("signal-history-v1");
+    if (cachedHistory) {
+      values = JSON.parse(cachedHistory).values;
     } else {
       if (!env.TWELVE_DATA_API_KEY) throw new Error("Twelve Data API secret is not configured");
       const upstream = new URL("https://api.twelvedata.com/time_series");
@@ -263,9 +263,11 @@ async function runScheduledScan(env) {
         throw new Error(data.message || `Twelve Data returned HTTP ${response.status}`);
       }
       values = data.values;
-      await cache.put(historyKey, new Response(JSON.stringify({ values, fetchedAt: new Date().toISOString() }), {
-        headers: { "Content-Type": "application/json" }
-      }), { expirationTtl: 55 });
+      // KV is shared across Worker locations, unlike the local Cache API.
+      await env.KV.put("signal-history-v1", JSON.stringify({
+        values,
+        fetchedAt: new Date().toISOString()
+      }), { expirationTtl: 60 });
     }
 
     const analysis = analyseXauusd(values, Date.now());
@@ -279,13 +281,13 @@ async function runScheduledScan(env) {
     };
 
     if (analysis.status === "CANDIDATE") {
-      const dedupeKey = new Request(`${SIGNAL_CACHE_ORIGIN}/__gold-desk-cache/signal-sent/${encodeURIComponent(analysis.signalId)}`);
-      const alreadySent = await cache.match(dedupeKey);
+      const dedupeKey = `signal-sent:${analysis.signalId}`;
+      const alreadySent = await env.KV.get(dedupeKey);
       if (!alreadySent && getNotificationStatus(env).telegram) {
         const delivery = await sendTradeNotifications(env, analysis);
         result.notifications.telegram = delivery.telegram.sent ? "sent" : "failed";
         if (delivery.telegram.sent) {
-          await cache.put(dedupeKey, new Response("sent"), { expirationTtl: 86400 });
+          await env.KV.put(dedupeKey, "sent", { expirationTtl: 86400 });
         }
       } else if (alreadySent) {
         result.notifications.telegram = "duplicate_suppressed";
@@ -294,9 +296,12 @@ async function runScheduledScan(env) {
       }
     }
 
-    await cache.put(latestKey, new Response(JSON.stringify(result), {
-      headers: { "Content-Type": "application/json" }
-    }), { expirationTtl: 3600 });
+    await env.KV.put("signals-latest", JSON.stringify(result), { expirationTtl: 86400 });
+    console.log("Gold Desk scheduled scan completed", {
+      status: result.status,
+      scannedAt: result.scannedAt,
+      signalId: result.signalId || null
+    });
   } catch (error) {
     const failure = {
       status: "ERROR",
@@ -306,9 +311,7 @@ async function runScheduledScan(env) {
       executionMode: "ALERTS_ONLY_NO_ORDERS",
       build: BUILD_ID
     };
-    await cache.put(latestKey, new Response(JSON.stringify(failure), {
-      headers: { "Content-Type": "application/json" }
-    }), { expirationTtl: 3600 });
+    await env.KV.put("signals-latest", JSON.stringify(failure), { expirationTtl: 86400 });
     console.error("Gold Desk scheduled scan failed", error);
   }
 }
