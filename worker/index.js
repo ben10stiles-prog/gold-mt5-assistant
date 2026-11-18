@@ -70,23 +70,17 @@ export default {
       }
 
       const configured = getNotificationStatus(env);
-      if (!configured.telegram && !configured.iphone) {
-        return json({ error: "No notification channels are configured" }, 503);
+      if (!configured.telegram) {
+        return json({ error: "Telegram is not configured" }, 503);
       }
 
       try {
         const delivery = await sendTestNotifications(env);
-        const allConfiguredChannelsSent =
-          (!configured.telegram || delivery.telegram.sent) &&
-          (!configured.iphone || delivery.iphone.sent);
-
         return json({
-          message: allConfiguredChannelsSent
-            ? "Test notification sent"
-            : "One or more notification channels failed",
-          delivery,
+          message: delivery.sent ? "Telegram test notification sent" : "Telegram test notification failed",
+          delivery: { telegram: delivery },
           build: BUILD_ID
-        }, allConfiguredChannelsSent ? 200 : 502, { "Cache-Control": "no-store" });
+        }, delivery.sent ? 200 : 502, { "Cache-Control": "no-store" });
       } catch {
         return json({ error: "Notification delivery failed", build: BUILD_ID }, 502);
       }
