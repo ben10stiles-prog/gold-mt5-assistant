@@ -1,5 +1,6 @@
 import { getNotificationStatus, sendTestNotifications, sendTradeNotifications } from "./notifications.js";
 import { analyseXauusd } from "./signal-engine.js";
+import { runBacktest } from "./backtest.js";
 
 const APP_ORIGIN = "https://ben10stiles-prog.github.io";
 const BUILD_ID = "gold-desk-kv-scan-2026-11-18-1";
@@ -44,7 +45,7 @@ export default {
 
     const url = new URL(request.url);
 
-    if (url.pathname === "/signals/latest" && request.method === "GET") {
+    if (url.pathname === "/backtest" && request.method === "POST") {\n      try {\n        const body = await request.json();\n        return json(runBacktest(body.candles), 200, { "Cache-Control": "no-store" });\n      } catch (error) {\n        return json({ error: error instanceof Error ? error.message : "Backtest failed" }, 400, { "Cache-Control": "no-store" });\n      }\n    }\n\n    if (url.pathname === "/signals/latest" && request.method === "GET") {
       if (!env.KV) return json({ status: "CONFIG_ERROR", message: "The GOLD_DESK_SIGNALS KV binding is missing.", build: BUILD_ID }, 503, { "Cache-Control": "no-store" });
       const saved = await env.KV.get("signals-latest");
       if (!saved) return json({ status: "NOT_SCANNED", message: "The scheduled scanner has not completed its first run yet.", build: BUILD_ID }, 200, { "Cache-Control": "no-store" });
