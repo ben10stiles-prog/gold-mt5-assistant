@@ -148,6 +148,68 @@ function utcSession(iso) {
   return "Late US";
 }
 
+
+function executionMetrics(trades, options) {
+  const {spread,slippagePerSide,commissionPerLotRoundTurn,contractSize=100,from=null,to=null}=options;
+  const candidates=trades.filter(t=>t.r!==null&&t.exitTime&&(!from||t.signalTime>=from)&&(!to||t.exitTime<=to))
+    .sort((a,b)=>a.signalTime.localeCompare(b.signalTime));
+  const chosen=[];let availableAt=-Infinity;
+  for(const t of candidates){
+    const signalMs=Date.parse(t.signalTime);
+    if(signalMs<availableAt)continue;
+    const risk=Math.abs(t.entry-t.stopLoss);
+    if(!(risk>0))continue;
+    const roundTripCost=spread+2*slippagePerSide+commissionPerLotRoundTurn/contractSize;
+    const costR=roundTripCost/risk;
+    chosen.push({...t,grossR:t.r,netR:t.r-costR,costR});
+    // Exit timestamp is the opening time of the exit M5 bar; lock until its close.
+    availableAt=Date.parse(t.exitTime)+FIVE_MINUTES;
+  }
+  let equity=0,peak=0,maxDrawdown=0;
+  for(const t of chosen){equity+=t.netR;peak=Math.max(peak,equity);maxDrawdown=Math.max(maxDrawdown,peak-equity);}
+  const wins=chosen.filter(t=>t.netR>0),losses=chosen.filter(t=>t.netR<0);
+  const grossProfit=wins.reduce((s,t)=>s+t.netR,0),grossLoss=-losses.reduce((s,t)=>s+t.netR,0);
+  return {
+    trades:chosen.length,skippedOverlapping:candidates.length-chosen.length,
+    wins:wins.length,losses:losses.length,
+    winRate:chosen.length?Number((100*wins.length/chosen.length).toFixed(1)):null,
+    grossR:Number(chosen.reduce((s,t)=>s+t.grossR,0).toFixed(2)),
+    totalCostsR:Number(chosen.reduce((s,t)=>s+t.costR,0).toFixed(2)),
+    netR:Number(chosen.reduce((s,t)=>s+t.netR,0).toFixed(2)),
+    expectancyR:chosen.length?Number((chosen.reduce((s,t)=>s+t.netR,0)/chosen.length).toFixed(3)):null,
+    profitFactor:grossLoss?Number((grossProfit/grossLoss).toFixed(2)):null,
+    maxDrawdownR:Number(maxDrawdown.toFixed(2))
+  };
+}
+
+function buildExecutionResearch(trades, candles) {
+  const filters=[
+    ["Baseline",t=>true],
+    ["New York only",t=>t.session==="New York"],
+    ["SELL only",t=>t.direction==="SELL"],
+    ["New York SELL only",t=>t.session==="New York"&&t.direction==="SELL"]
+  ];
+  const spreads=[0.30,0.51,0.75,1.00];
+  const slippagePerSide=0.10,commissionPerLotRoundTurn=0,contractSize=100;
+  const start=candles[0].time,end=candles[candles.length-1].time+FIVE_MINUTES;
+  const split=start+Math.floor((end-start)*0.7);
+  const dateIso=ms=>new Date(ms).toISOString();
+  return {
+    model:"Single position at a time; signals arriving before the prior position closes are skipped. Costs are deducted from each trade's R result.",
+    assumptions:{observedSpread:0.51,spreadScenarios:spreads,slippagePerSide,commissionPerLotRoundTurn,contractSize,commissionNote:"Commission defaults to zero because the user's broker commission schedule has not been confirmed. Contract size assumes 100 troy ounces per standard lot.",priceNote:"Twelve Data spot OHLC is used as a mid-price proxy; actual Kudo bid/ask execution and spread variation are not reconstructed. Cost deduction is an approximation, not tick-level execution."},
+    splitAt:dateIso(split),
+    scenarios:spreads.map(spread=>({
+      spread,
+      filters:filters.map(([name,fn])=>({
+        name,
+        full:executionMetrics(trades.filter(fn),{spread,slippagePerSide,commissionPerLotRoundTurn,contractSize}),
+        train:executionMetrics(trades.filter(fn),{spread,slippagePerSide,commissionPerLotRoundTurn,contractSize,from:dateIso(start),to:dateIso(split)}),
+        outOfSample:executionMetrics(trades.filter(fn),{spread,slippagePerSide,commissionPerLotRoundTurn,contractSize,from:dateIso(split),to:dateIso(end)})
+      }))
+    }))
+  };
+}
+
 export function runBacktestM5(input) {
   const candles=parseFiveMinuteCandles(input);
   const m15=aggregateFiveMinute(candles,3), h1=aggregateFiveMinute(candles,12);
@@ -234,6 +296,6 @@ export function runBacktestM5(input) {
     period:{from:new Date(candles[0].time).toISOString(),to:new Date(candles[candles.length-1].time+FIVE_MINUTES).toISOString()},
     assumptions:{signal:"Same GD-MTF-1.0 H1/M15/M5 conditions; M15 and H1 built from complete M5 bars",entry:"Signal M5 close; exits begin on next M5 candle",stopTarget:"ATR M5 stop at 1.5x ATR; target at 2R",sameCandle:"If stop and target both touch in one M5 candle, count as stop first",costs:"Spread, commission, slippage and swap NOT included; gross results only",sessions:"UTC hour buckets; not daylight-saving-adjusted London/New York exchange sessions",positionModel:"Each signal is scored independently; overlapping signals are allowed and this is not a single-position portfolio simulation"},
     summary:{signals:trades.length,closed:closed.length,open:trades.length-closed.length,wins:wins.length,losses:losses.length,winRate:closed.length?Number((100*wins.length/closed.length).toFixed(1)):null,totalR:Number(totalR.toFixed(2)),expectancyR:closed.length?Number((totalR/closed.length).toFixed(3)):null,profitFactor:grossLoss?Number((grossWin/grossLoss).toFixed(2)):null,maxDrawdownR:Number(maxDrawdown.toFixed(2))},
-    sessions,directionBreakdown,variants,chronological,trades:trades.slice(-500)
+    sessions,directionBreakdown,variants,chronological,executionResearch:buildExecutionResearch(trades,candles),trades:trades.slice(-500)
   };
 }
