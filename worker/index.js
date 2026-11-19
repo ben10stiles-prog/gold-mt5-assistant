@@ -85,7 +85,8 @@ export default {
         upstream.searchParams.set("end_date",chunk.end);
         upstream.searchParams.set("timezone","UTC");
         upstream.searchParams.set("order","asc");
-        upstream.searchParams.set("apikey",env.TWELVE_DATA_API_KEY);\n        const response=await fetch(upstream.toString());
+        upstream.searchParams.set("apikey",env.TWELVE_DATA_API_KEY);
+        const response=await fetch(upstream.toString());
         const data=await response.json();
         if(!response.ok||data.status!=="ok"||!Array.isArray(data.values)){
           const rateLimited=response.status===429||data.code===429;
