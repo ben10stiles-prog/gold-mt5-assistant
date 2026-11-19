@@ -89,124 +89,21 @@ $('runAutoBacktest').onclick=async()=>{
   const button=$('runAutoBacktest');button.disabled=true;$('backtestResults').innerHTML='';
   const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
   const render=data=>{
-    const s=data.summary;
+    const s=data.summary, x=data.executionResearch;
     $('backtestStatus').textContent='Completed · '+data.period.from+' to '+data.period.to+' · '+data.bars.toLocaleString()+' five-minute candles';
     $('backtestStatus').className='status good';
-    $('backtestResults').innerHTML='<div class="grid" style="margin-top:12px">'+[['Signals',s.signals],['Closed trades',s.closed],['Win rate',s.winRate===null?'—':s.winRate+'%'],['Net result',s.totalR+'R'],['Expectancy',s.expectancyR===null?'—':s.expectancyR+'R'],['Max drawdown',s.maxDrawdownR+'R'],['Profit factor',s.profitFactor===null?'—':s.profitFactor],['Still open',s.open]].map(x=>'<div class="metric"><span class="muted">'+x[0]+'</span><b>'+x[1]+'</b></div>').join('')+'</div><h3>By session (UTC)</h3><table><tr><th>Session</th><th>Trades</th><th>Win rate</th><th>Net R</th></tr>'+Object.entries(data.sessions).map(([k,v])=>'<tr><td>'+k+'</td><td>'+v.trades+'</td><td>'+(v.winRate===null?'—':v.winRate+'%')+'</td><td>'+v.totalR+'</td></tr>').join('')+'</table><h3>GD-MTF-1.1 research comparisons</h3><p class="hint">These are filtered subsets of the unchanged GD-MTF-1.0 trades, not separately optimised strategies.</p><table><tr><th>Test</th><th>Trades</th><th>Win rate</th><th>Net R</th><th>PF</th><th>Max DD</th></tr>'+[['Baseline',data.variants.baseline],['New York only',data.variants.newYorkOnly],['London only',data.variants.londonOnly],['Asia only',data.variants.asiaOnly],['Late US only',data.variants.lateUsOnly],['BUY only',data.variants.buyOnly],['SELL only',data.variants.sellOnly]].map(([n,v])=>'<tr><td>'+n+'</td><td>'+v.trades+'</td><td>'+(v.winRate===null?'—':v.winRate+'%')+'</td><td>'+v.totalR+'R</td><td>'+(v.profitFactor===null?'—':v.profitFactor)+'</td><td>'+v.maxDrawdownR+'R</td></tr>').join('')+'</table><h3>Chronological diagnostic</h3><table><tr><th>Period</th><th>Trades</th><th>Win rate</th><th>Net R</th><th>PF</th></tr>'+[['First 70%',data.chronological.first70Percent],['Last 30%',data.chronological.last30Percent]].map(([n,v])=>'<tr><td>'+n+'</td><td>'+v.trades+'</td><td>'+(v.winRate===null?'—':v.winRate+'%')+'</td><td>'+v.totalR+'R</td><td>'+(v.profitFactor===null?'—':v.profitFactor)+'</td></tr>').join('')+'</table><p class="hint">'+data.chronological.note+'</p><h3>GD-MTF-1.2 realistic execution research</h3><p class="hint">'+data.executionResearch.model+'</p><p class="hint">Assumptions: slippage <p class="hint">Assumptions: '+data.assumptions.signal+'. '+data.assumptions.entry+'. '+data.assumptions.sameCandle+'.</p><p class="hint">Position assumption: '+data.assumptions.positionModel+'. Costs excluded: '+data.assumptions.costs+'. UTC session buckets are not adjusted for daylight saving. Historical results are not evidence of future profitability.</p>';
-  };
-  try{
-    let jobId=localStorage.getItem('goldDeskBacktestJobId');
-    const selectedMonths=$('backtestMonths').value;
-    if(jobId && localStorage.getItem('goldDeskBacktestMonths')!==selectedMonths){localStorage.removeItem('goldDeskBacktestJobId');localStorage.removeItem('goldDeskBacktestMonths');jobId=null;}
-    if(!jobId){
-      $('backtestStatus').textContent='Preparing '+$('backtestMonths').value+'-month historical download…';$('backtestStatus').className='status warning';
-      const start=await fetch(API_BASE+'/backtest/history/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({months:Number($('backtestMonths').value)})});
-      const created=await start.json();if(!start.ok)throw new Error(created.error||'Could not start historical download');
-      jobId=created.jobId;localStorage.setItem('goldDeskBacktestJobId',jobId);localStorage.setItem('goldDeskBacktestMonths',selectedMonths);
-      $('backtestStatus').textContent='Download prepared: 0 / '+created.totalChunks+' date windows.';
+    const metricRows=[['Signals',s.signals],['Closed trades',s.closed],['Win rate',s.winRate===null?'—':s.winRate+'%'],['Net result',s.totalR+'R'],['Expectancy',s.expectancyR===null?'—':s.expectancyR+'R'],['Max drawdown',s.maxDrawdownR+'R'],['Profit factor',s.profitFactor===null?'—':s.profitFactor],['Still open',s.open]];
+    const variantRows=[['Baseline',data.variants.baseline],['New York only',data.variants.newYorkOnly],['London only',data.variants.londonOnly],['Asia only',data.variants.asiaOnly],['Late US only',data.variants.lateUsOnly],['BUY only',data.variants.buyOnly],['SELL only',data.variants.sellOnly]];
+    const fmt=v=>v===null||v===undefined?'—':v;
+    let executionHtml='';
+    if(x&&Array.isArray(x.scenarios)){
+      executionHtml='<h3>GD-MTF-1.2 realistic execution research</h3><p class="hint">'+x.model+'</p><p class="hint">Assumptions: spread scenarios include your observed $0.51 quote; slippage is $'+x.assumptions.slippagePerSide.toFixed(2)+' per side. Commission is currently $'+x.assumptions.commissionPerLotRoundTurn.toFixed(2)+' per standard-lot round turn because Kudo charges have not been confirmed. '+x.assumptions.priceNote+'</p><p class="hint">Chronological split: '+x.splitAt+'. Training trades must close before the split; out-of-sample trades must start after it and close within the dataset.</p>';
+      executionHtml+=x.scenarios.map(sc=>'<h4>Spread $'+sc.spread.toFixed(2)+'</h4><table><tr><th>Filter</th><th>Trades</th><th>Full net R</th><th>Full PF</th><th>Train net R</th><th>OOS net R</th><th>OOS PF</th><th>OOS trades</th></tr>'+sc.filters.map(v=>'<tr><td>'+v.name+'</td><td>'+v.full.trades+'</td><td>'+v.full.netR+'R</td><td>'+fmt(v.full.profitFactor)+'</td><td>'+v.train.netR+'R</td><td>'+v.outOfSample.netR+'R</td><td>'+fmt(v.outOfSample.profitFactor)+'</td><td>'+v.outOfSample.trades+'</td></tr>').join('')+'</table>').join('');
+      executionHtml+='<p class="hint">This is an approximate OHLC simulation, not a reconstruction of Kudo fills. It cannot model variable bid/ask spread, tick-level execution, gaps, swap or unconfirmed commission. One position at a time is enforced in the simulation.</p>';
+    } else {
+      executionHtml='<h3>GD-MTF-1.2 realistic execution research</h3><p class="hint">The server response does not contain executionResearch. The updated Worker may not yet be deployed. Do not interpret the earlier gross results as cost-adjusted.</p>';
     }
-    let completed=0,total=0;
-    while(true){
-      $('backtestStatus').textContent='Downloading historical candles… '+completed+' / '+total+' windows completed. Keep this page open.';
-      const response=await fetch(API_BASE+'/backtest/history/step',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jobId})});
-      const progress=await response.json();
-      if(response.status===429){
-        $('backtestStatus').textContent='Twelve Data rate limit reached. Automatically waiting 60 seconds before retrying…';
-        await wait(60000);continue;
-      }
-      if(!response.ok)throw new Error(progress.error||'Historical download failed');
-      completed=progress.completed;total=progress.totalChunks;
-      $('backtestStatus').textContent='Downloaded '+completed+' / '+total+' windows · '+progress.totalBars.toLocaleString()+' candles. '+(completed<total?'Next window starts shortly…':'Preparing backtest…');
-      if(progress.status==='complete'||completed===total)break;
-      await wait(8200);
-    }
-    $('backtestStatus').textContent='All historical data downloaded. Calculating the six-to-twelve-month backtest…';
-    const response=await fetch(API_BASE+'/backtest/history/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jobId})});
-    const data=await response.json();if(!response.ok)throw new Error(data.error||'Backtest calculation failed');
-    localStorage.removeItem('goldDeskBacktestJobId');localStorage.removeItem('goldDeskBacktestMonths');render(data);
-  }catch(e){
-    $('backtestStatus').textContent=e.message+' Your download progress is saved; tap again to resume if a job was started.';
-    $('backtestStatus').className='status bad';
-  }finally{button.disabled=false}
-};
-refreshNotificationStatus();
-</script></body></html>+data.executionResearch.assumptions.slippagePerSide.toFixed(2)+' per side; commission <p class="hint">Assumptions: '+data.assumptions.signal+'. '+data.assumptions.entry+'. '+data.assumptions.sameCandle+'.</p><p class="hint">Position assumption: '+data.assumptions.positionModel+'. Costs excluded: '+data.assumptions.costs+'. UTC session buckets are not adjusted for daylight saving. Historical results are not evidence of future profitability.</p>';
-  };
-  try{
-    let jobId=localStorage.getItem('goldDeskBacktestJobId');
-    const selectedMonths=$('backtestMonths').value;
-    if(jobId && localStorage.getItem('goldDeskBacktestMonths')!==selectedMonths){localStorage.removeItem('goldDeskBacktestJobId');localStorage.removeItem('goldDeskBacktestMonths');jobId=null;}
-    if(!jobId){
-      $('backtestStatus').textContent='Preparing '+$('backtestMonths').value+'-month historical download…';$('backtestStatus').className='status warning';
-      const start=await fetch(API_BASE+'/backtest/history/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({months:Number($('backtestMonths').value)})});
-      const created=await start.json();if(!start.ok)throw new Error(created.error||'Could not start historical download');
-      jobId=created.jobId;localStorage.setItem('goldDeskBacktestJobId',jobId);localStorage.setItem('goldDeskBacktestMonths',selectedMonths);
-      $('backtestStatus').textContent='Download prepared: 0 / '+created.totalChunks+' date windows.';
-    }
-    let completed=0,total=0;
-    while(true){
-      $('backtestStatus').textContent='Downloading historical candles… '+completed+' / '+total+' windows completed. Keep this page open.';
-      const response=await fetch(API_BASE+'/backtest/history/step',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jobId})});
-      const progress=await response.json();
-      if(response.status===429){
-        $('backtestStatus').textContent='Twelve Data rate limit reached. Automatically waiting 60 seconds before retrying…';
-        await wait(60000);continue;
-      }
-      if(!response.ok)throw new Error(progress.error||'Historical download failed');
-      completed=progress.completed;total=progress.totalChunks;
-      $('backtestStatus').textContent='Downloaded '+completed+' / '+total+' windows · '+progress.totalBars.toLocaleString()+' candles. '+(completed<total?'Next window starts shortly…':'Preparing backtest…');
-      if(progress.status==='complete'||completed===total)break;
-      await wait(8200);
-    }
-    $('backtestStatus').textContent='All historical data downloaded. Calculating the six-to-twelve-month backtest…';
-    const response=await fetch(API_BASE+'/backtest/history/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jobId})});
-    const data=await response.json();if(!response.ok)throw new Error(data.error||'Backtest calculation failed');
-    localStorage.removeItem('goldDeskBacktestJobId');localStorage.removeItem('goldDeskBacktestMonths');render(data);
-  }catch(e){
-    $('backtestStatus').textContent=e.message+' Your download progress is saved; tap again to resume if a job was started.';
-    $('backtestStatus').className='status bad';
-  }finally{button.disabled=false}
-};
-refreshNotificationStatus();
-</script></body></html>+data.executionResearch.assumptions.commissionPerLotRoundTurn.toFixed(2)+' per round-turn standard lot (not confirmed); 100 oz per standard lot. Spread scenarios include your observed $0.51 quote. Costs are deducted from gross R; actual broker execution is not available in Twelve Data OHLC.</p><p class="hint">Chronological split: '+data.executionResearch.splitAt+'. Training trades must exit before the split; out-of-sample trades must start after it and exit within the dataset.</p>'+data.executionResearch.scenarios.map(sc=>'<h4>Spread <p class="hint">Assumptions: '+data.assumptions.signal+'. '+data.assumptions.entry+'. '+data.assumptions.sameCandle+'.</p><p class="hint">Position assumption: '+data.assumptions.positionModel+'. Costs excluded: '+data.assumptions.costs+'. UTC session buckets are not adjusted for daylight saving. Historical results are not evidence of future profitability.</p>';
-  };
-  try{
-    let jobId=localStorage.getItem('goldDeskBacktestJobId');
-    const selectedMonths=$('backtestMonths').value;
-    if(jobId && localStorage.getItem('goldDeskBacktestMonths')!==selectedMonths){localStorage.removeItem('goldDeskBacktestJobId');localStorage.removeItem('goldDeskBacktestMonths');jobId=null;}
-    if(!jobId){
-      $('backtestStatus').textContent='Preparing '+$('backtestMonths').value+'-month historical download…';$('backtestStatus').className='status warning';
-      const start=await fetch(API_BASE+'/backtest/history/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({months:Number($('backtestMonths').value)})});
-      const created=await start.json();if(!start.ok)throw new Error(created.error||'Could not start historical download');
-      jobId=created.jobId;localStorage.setItem('goldDeskBacktestJobId',jobId);localStorage.setItem('goldDeskBacktestMonths',selectedMonths);
-      $('backtestStatus').textContent='Download prepared: 0 / '+created.totalChunks+' date windows.';
-    }
-    let completed=0,total=0;
-    while(true){
-      $('backtestStatus').textContent='Downloading historical candles… '+completed+' / '+total+' windows completed. Keep this page open.';
-      const response=await fetch(API_BASE+'/backtest/history/step',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jobId})});
-      const progress=await response.json();
-      if(response.status===429){
-        $('backtestStatus').textContent='Twelve Data rate limit reached. Automatically waiting 60 seconds before retrying…';
-        await wait(60000);continue;
-      }
-      if(!response.ok)throw new Error(progress.error||'Historical download failed');
-      completed=progress.completed;total=progress.totalChunks;
-      $('backtestStatus').textContent='Downloaded '+completed+' / '+total+' windows · '+progress.totalBars.toLocaleString()+' candles. '+(completed<total?'Next window starts shortly…':'Preparing backtest…');
-      if(progress.status==='complete'||completed===total)break;
-      await wait(8200);
-    }
-    $('backtestStatus').textContent='All historical data downloaded. Calculating the six-to-twelve-month backtest…';
-    const response=await fetch(API_BASE+'/backtest/history/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jobId})});
-    const data=await response.json();if(!response.ok)throw new Error(data.error||'Backtest calculation failed');
-    localStorage.removeItem('goldDeskBacktestJobId');localStorage.removeItem('goldDeskBacktestMonths');render(data);
-  }catch(e){
-    $('backtestStatus').textContent=e.message+' Your download progress is saved; tap again to resume if a job was started.';
-    $('backtestStatus').className='status bad';
-  }finally{button.disabled=false}
-};
-refreshNotificationStatus();
-</script></body></html>+sc.spread.toFixed(2)+'</h4><table><tr><th>Filter</th><th>Full net R</th><th>Full PF</th><th>Train net R</th><th>OOS net R</th><th>OOS trades</th></tr>'+sc.filters.map(x=>'<tr><td>'+x.name+'</td><td>'+x.full.netR+'R</td><td>'+(x.full.profitFactor===null?'—':x.full.profitFactor)+'</td><td>'+x.train.netR+'R</td><td>'+x.outOfSample.netR+'R</td><td>'+x.outOfSample.trades+'</td></tr>').join('')+'</table>').join('')+'<p class="hint">Single-position model skips overlapping signals until the previous position closes. This remains an approximation: OHLC cannot reconstruct tick-level bid/ask fills, variable spread, gaps, swap or actual commission. Do not treat it as a verified Kudo performance statement.</p><p class="hint">Source: '+data.dataSource+'. '+data.historyNote+'</p><p class="hint">Assumptions: '+data.assumptions.signal+'. '+data.assumptions.entry+'. '+data.assumptions.sameCandle+'.</p><p class="hint">Position assumption: '+data.assumptions.positionModel+'. Costs excluded: '+data.assumptions.costs+'. UTC session buckets are not adjusted for daylight saving. Historical results are not evidence of future profitability.</p>';
+    $('backtestResults').innerHTML='<div class="grid" style="margin-top:12px">'+metricRows.map(v=>'<div class="metric"><span class="muted">'+v[0]+'</span><b>'+v[1]+'</b></div>').join('')+'</div><h3>By session (UTC)</h3><table><tr><th>Session</th><th>Trades</th><th>Win rate</th><th>Net R</th></tr>'+Object.entries(data.sessions).map(([k,v])=>'<tr><td>'+k+'</td><td>'+v.trades+'</td><td>'+fmt(v.winRate===null?null:v.winRate+'%')+'</td><td>'+v.totalR+'</td></tr>').join('')+'</table><h3>GD-MTF-1.1 research comparisons</h3><p class="hint">These are filtered subsets of the unchanged GD-MTF-1.0 trades, not separately optimised strategies.</p><table><tr><th>Test</th><th>Trades</th><th>Win rate</th><th>Net R</th><th>PF</th><th>Max DD</th></tr>'+variantRows.map(([n,v])=>'<tr><td>'+n+'</td><td>'+v.trades+'</td><td>'+fmt(v.winRate===null?null:v.winRate+'%')+'</td><td>'+v.totalR+'R</td><td>'+fmt(v.profitFactor)+'</td><td>'+v.maxDrawdownR+'R</td></tr>').join('')+'</table><h3>Chronological diagnostic</h3><table><tr><th>Period</th><th>Trades</th><th>Win rate</th><th>Net R</th><th>PF</th></tr>'+[['First 70%',data.chronological.first70Percent],['Last 30%',data.chronological.last30Percent]].map(([n,v])=>'<tr><td>'+n+'</td><td>'+v.trades+'</td><td>'+fmt(v.winRate===null?null:v.winRate+'%')+'</td><td>'+v.totalR+'R</td><td>'+fmt(v.profitFactor)+'</td></tr>').join('')+'</table><p class="hint">'+data.chronological.note+'</p>'+executionHtml;
   };
   try{
     let jobId=localStorage.getItem('goldDeskBacktestJobId');
