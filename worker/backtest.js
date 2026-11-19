@@ -71,7 +71,7 @@ export function runBacktest(input) {
 const FIVE_MINUTES = 300_000;
 
 function parseFiveMinuteCandles(input) {
-  if (!Array.isArray(input) || input.length < 720 || input.length > 60000) {
+  if (!Array.isArray(input) || input.length < 720 || input.length > 120000) {
     throw new Error("Historical dataset must contain between 720 and 60,000 five-minute candles.");
   }
   const parsed = input.map(c => {
