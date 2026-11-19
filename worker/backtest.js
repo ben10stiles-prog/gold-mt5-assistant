@@ -32,9 +32,9 @@ export function runBacktest(input) {
   const candles = validCandles(input);
   const trades = [];
   const seen = new Set();
-  for (let i=2399;i<candles.length-1;i++) {
+  for (let i=3599;i<candles.length-1;i+=5) {
     const t = Date.parse(candles[i].datetime.replace(" ","T")+"Z");
-    const analysis = analyseXauusd(candles.slice(0,i+1), t + MINUTE + 5000);
+    const analysis = analyseXauusd(candles.slice(Math.max(0, i - 3599), i+1), t + MINUTE + 5000);
     if (analysis.status !== "CANDIDATE" || seen.has(analysis.signalId)) continue;
     seen.add(analysis.signalId);
     let outcome = "OPEN", exitPrice = null, exitTime = null, r = null;
@@ -61,7 +61,7 @@ export function runBacktest(input) {
   return {
     strategy:"GD-MTF-1.0", symbol:"XAU/USD", bars:candles.length,
     period:{from:candles[0].datetime,to:candles[candles.length-1].datetime},
-    assumptions:{entry:"Signal close; next candle onward for exit",stopTarget:"Fixed 1R stop / 2R target from strategy",sameCandle:"If stop and target both touch in one candle, count as stop first",costs:"Spread, commission, slippage and swap NOT included",data:"User-supplied OHLC; confirm timezone and broker feed"},
+    assumptions:{entry:"Signal candle close; evaluate exits from the next one-minute candle",stopTarget:"Fixed 1R stop / 2R target from strategy",sameCandle:"If stop and target both touch in one candle, count as stop first",costs:"Spread, commission, slippage and swap NOT included",data:"User-supplied OHLC; confirm timezone and broker feed"},
     summary:{signals:trades.length,closed:closed.length,open:trades.length-closed.length,wins:wins.length,losses:losses.length,winRate:closed.length?Number((100*wins.length/closed.length).toFixed(1)):null,totalR:Number(totalR.toFixed(2)),expectancyR:closed.length?Number((totalR/closed.length).toFixed(3)):null,profitFactor:losses.length?Number((wins.length*2/losses.length).toFixed(2)):null,maxDrawdownR:Number(maxDrawdown.toFixed(2))},
     sessions:grouped,trades:trades.slice(-250)
   };
