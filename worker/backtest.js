@@ -66,3 +66,144 @@ export function runBacktest(input) {
     sessions:grouped,trades:trades.slice(-250)
   };
 }
+
+
+const FIVE_MINUTES = 300_000;
+
+function parseFiveMinuteCandles(input) {
+  if (!Array.isArray(input) || input.length < 720 || input.length > 60000) {
+    throw new Error("Historical dataset must contain between 720 and 60,000 five-minute candles.");
+  }
+  const parsed = input.map(c => {
+    const raw = String(c.datetime || "");
+    const time = Date.parse(raw.includes("T") ? raw : raw.replace(" ", "T") + "Z");
+    const open=Number(c.open), high=Number(c.high), low=Number(c.low), close=Number(c.close);
+    if (![time,open,high,low,close].every(Number.isFinite) || high < Math.max(open,close) || low > Math.min(open,close) || high < low) return null;
+    return { time, open, high, low, close };
+  }).filter(Boolean).sort((a,b)=>a.time-b.time);
+  const unique=[];
+  for (const c of parsed) if (!unique.length || unique[unique.length-1].time!==c.time) unique.push(c);
+  if (unique.length < 720) throw new Error("Not enough valid five-minute candles after validation.");
+  return unique;
+}
+
+function aggregateFiveMinute(candles, factor) {
+  const span=FIVE_MINUTES*factor, groups=new Map();
+  for (const c of candles) {
+    const start=Math.floor(c.time/span)*span;
+    if (!groups.has(start)) groups.set(start,[]);
+    groups.get(start).push(c);
+  }
+  const result=[];
+  for (const [time,g] of groups) {
+    g.sort((a,b)=>a.time-b.time);
+    if (g.length!==factor) continue;
+    let contiguous=true;
+    for(let i=0;i<factor;i++) if(g[i].time!==time+i*FIVE_MINUTES) contiguous=false;
+    if(!contiguous) continue;
+    result.push({time,open:g[0].open,high:Math.max(...g.map(x=>x.high)),low:Math.min(...g.map(x=>x.low)),close:g[g.length-1].close});
+  }
+  result.sort((a,b)=>a.time-b.time);
+  return result;
+}
+
+function emaSeries(values, period) {
+  const out=new Array(values.length).fill(null);
+  if(values.length<period) return out;
+  const k=2/(period+1);
+  let v=values.slice(0,period).reduce((a,b)=>a+b,0)/period;
+  out[period-1]=v;
+  for(let i=period;i<values.length;i++){v=values[i]*k+v*(1-k);out[i]=v;}
+  return out;
+}
+
+function atrSeries(candles, period=14) {
+  const out=new Array(candles.length).fill(null), tr=[];
+  for(let i=0;i<candles.length;i++){
+    if(i===0){tr.push(candles[i].high-candles[i].low);}
+    else {const c=candles[i],p=candles[i-1];tr.push(Math.max(c.high-c.low,Math.abs(c.high-p.close),Math.abs(c.low-p.close)));}
+    if(i>=period) out[i]=tr.slice(i-period+1,i+1).reduce((a,b)=>a+b,0)/period;
+  }
+  return out;
+}
+
+function rsiSeries(candles, period=14) {
+  const out=new Array(candles.length).fill(null);
+  for(let i=period;i<candles.length;i++){
+    let gains=0,losses=0;
+    for(let j=i-period+1;j<=i;j++){
+      const change=candles[j].close-candles[j-1].close;
+      if(change>0) gains+=change; else losses-=change;
+    }
+    out[i]=losses===0?100:100-(100/(1+(gains/period)/(losses/period)));
+  }
+  return out;
+}
+
+function utcSession(iso) {
+  const h=new Date(iso).getUTCHours();
+  if(h<7)return "Asia";
+  if(h<13)return "London";
+  if(h<17)return "New York";
+  return "Late US";
+}
+
+export function runBacktestM5(input) {
+  const candles=parseFiveMinuteCandles(input);
+  const m15=aggregateFiveMinute(candles,3), h1=aggregateFiveMinute(candles,12);
+  const m15Index=new Map(m15.map((c,i)=>[c.time,i]));
+  const h1Index=new Map(h1.map((c,i)=>[c.time,i]));
+  const m15Fast=emaSeries(m15.map(c=>c.close),20), m15Slow=emaSeries(m15.map(c=>c.close),50), m15Atr=atrSeries(m15);
+  const h1Fast=emaSeries(h1.map(c=>c.close),20), h1Slow=emaSeries(h1.map(c=>c.close),50);
+  const m5Atr=atrSeries(candles), m5Rsi=rsiSeries(candles);
+  const trades=[], seen=new Set();
+  for(let i=719;i<candles.length-1;i++){
+    const c=candles[i], closeTime=c.time+FIVE_MINUTES;
+    const m15Start=Math.floor((closeTime-15*60_000)/(15*60_000))*(15*60_000);
+    const h1Start=Math.floor((closeTime-60*60_000)/(60*60_000))*(60*60_000);
+    const mi=m15Index.get(m15Start), hi=h1Index.get(h1Start);
+    if(mi===undefined||hi===undefined||mi<50||hi<50||m15Atr[mi]===null||m5Atr[i]===null||m5Rsi[i]===null)continue;
+    const h1Last=h1[hi],m15Last=m15[mi],m15Prev=m15[mi-1];
+    const bullishH1=h1Fast[hi]>h1Slow[hi]&&h1Last.close>h1Fast[hi];
+    const bearishH1=h1Fast[hi]<h1Slow[hi]&&h1Last.close<h1Fast[hi];
+    const bullishM15=m15Fast[mi]>m15Slow[mi]&&m15Last.close>m15Fast[mi];
+    const bearishM15=m15Fast[mi]<m15Slow[mi]&&m15Last.close<m15Fast[mi];
+    const longPullback=m15Prev.low<=m15Fast[mi]+0.35*m15Atr[mi]&&m15Last.close>m15Fast[mi];
+    const shortPullback=m15Prev.high>=m15Fast[mi]-0.35*m15Atr[mi]&&m15Last.close<m15Fast[mi];
+    const prior=candles.slice(i-3,i);
+    const priorHigh=Math.max(...prior.map(x=>x.high)),priorLow=Math.min(...prior.map(x=>x.low));
+    const longTrigger=c.close>priorHigh&&m5Rsi[i]>=52&&m5Rsi[i]<=70;
+    const shortTrigger=c.close<priorLow&&m5Rsi[i]>=30&&m5Rsi[i]<=48;
+    let direction=null;
+    if(bullishH1&&bullishM15&&longPullback&&longTrigger)direction="BUY";
+    if(bearishH1&&bearishM15&&shortPullback&&shortTrigger)direction="SELL";
+    if(!direction)continue;
+    const signalTime=new Date(closeTime).toISOString(),id=direction+"-"+c.time;
+    if(seen.has(id))continue;seen.add(id);
+    const entry=c.close,risk=Math.max(1.5*m5Atr[i],0.01);
+    const stop=direction==="BUY"?entry-risk:entry+risk,target=direction==="BUY"?entry+2*risk:entry-2*risk;
+    let outcome="OPEN",exitPrice=null,exitTime=null,r=null;
+    for(let j=i+1;j<candles.length;j++){
+      const bar=candles[j],stopHit=direction==="BUY"?bar.low<=stop:bar.high>=stop,targetHit=direction==="BUY"?bar.high>=target:bar.low<=target;
+      if(stopHit){outcome="LOSS";exitPrice=stop;exitTime=new Date(bar.time).toISOString();r=-1;break;}
+      if(targetHit){outcome="WIN";exitPrice=target;exitTime=new Date(bar.time).toISOString();r=2;break;}
+    }
+    trades.push({id,direction,entry:Number(entry.toFixed(2)),stopLoss:Number(stop.toFixed(2)),takeProfit:Number(target.toFixed(2)),signalTime,session:utcSession(signalTime),outcome,exitPrice,exitTime,r});
+  }
+  const closed=trades.filter(t=>t.r!==null),wins=closed.filter(t=>t.r>0),losses=closed.filter(t=>t.r<0);
+  const totalR=closed.reduce((s,t)=>s+t.r,0),grossWin=wins.reduce((s,t)=>s+t.r,0),grossLoss=-losses.reduce((s,t)=>s+t.r,0);
+  let equity=0,peak=0,maxDrawdown=0;
+  for(const t of closed){equity+=t.r;peak=Math.max(peak,equity);maxDrawdown=Math.max(maxDrawdown,peak-equity);}
+  const sessions={};
+  for(const name of ["Asia","London","New York","Late US"]){
+    const a=closed.filter(t=>t.session===name),w=a.filter(t=>t.r>0);
+    sessions[name]={trades:a.length,wins:w.length,winRate:a.length?Number((100*w.length/a.length).toFixed(1)):null,totalR:Number(a.reduce((s,t)=>s+t.r,0).toFixed(2))};
+  }
+  return {
+    strategy:"GD-MTF-1.0",symbol:"XAU/USD",interval:"5min",bars:candles.length,
+    period:{from:new Date(candles[0].time).toISOString(),to:new Date(candles[candles.length-1].time+FIVE_MINUTES).toISOString()},
+    assumptions:{signal:"Same GD-MTF-1.0 H1/M15/M5 conditions; M15 and H1 built from complete M5 bars",entry:"Signal M5 close; exits begin on next M5 candle",stopTarget:"ATR M5 stop at 1.5x ATR; target at 2R",sameCandle:"If stop and target both touch in one M5 candle, count as stop first",costs:"Spread, commission, slippage and swap NOT included; gross results only",sessions:"UTC hour buckets; not daylight-saving-adjusted London/New York exchange sessions"},
+    summary:{signals:trades.length,closed:closed.length,open:trades.length-closed.length,wins:wins.length,losses:losses.length,winRate:closed.length?Number((100*wins.length/closed.length).toFixed(1)):null,totalR:Number(totalR.toFixed(2)),expectancyR:closed.length?Number((totalR/closed.length).toFixed(3)):null,profitFactor:grossLoss?Number((grossWin/grossLoss).toFixed(2)):null,maxDrawdownR:Number(maxDrawdown.toFixed(2))},
+    sessions,trades:trades.slice(-500)
+  };
+}
