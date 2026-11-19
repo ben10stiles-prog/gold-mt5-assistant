@@ -199,11 +199,41 @@ export function runBacktestM5(input) {
     const a=closed.filter(t=>t.session===name),w=a.filter(t=>t.r>0);
     sessions[name]={trades:a.length,wins:w.length,winRate:a.length?Number((100*w.length/a.length).toFixed(1)):null,totalR:Number(a.reduce((s,t)=>s+t.r,0).toFixed(2))};
   }
+
+  const metricSet = list => {
+    const a=list.filter(t=>t.r!==null).sort((x,y)=>x.signalTime.localeCompare(y.signalTime));
+    const w=a.filter(t=>t.r>0),l=a.filter(t=>t.r<0),sum=a.reduce((s,t)=>s+t.r,0);
+    const gw=w.reduce((s,t)=>s+t.r,0),gl=-l.reduce((s,t)=>s+t.r,0);
+    let eq=0,peak=0,dd=0;
+    for(const t of a){eq+=t.r;peak=Math.max(peak,eq);dd=Math.max(dd,peak-eq);}
+    return {trades:a.length,wins:w.length,losses:l.length,winRate:a.length?Number((100*w.length/a.length).toFixed(1)):null,totalR:Number(sum.toFixed(2)),expectancyR:a.length?Number((sum/a.length).toFixed(3)):null,profitFactor:gl?Number((gw/gl).toFixed(2)):null,maxDrawdownR:Number(dd.toFixed(2))};
+  };
+  const directionBreakdown={
+    BUY:metricSet(trades.filter(t=>t.direction==="BUY")),
+    SELL:metricSet(trades.filter(t=>t.direction==="SELL"))
+  };
+  const variants={
+    baseline:metricSet(trades),
+    newYorkOnly:metricSet(trades.filter(t=>t.session==="New York")),
+    londonOnly:metricSet(trades.filter(t=>t.session==="London")),
+    asiaOnly:metricSet(trades.filter(t=>t.session==="Asia")),
+    lateUsOnly:metricSet(trades.filter(t=>t.session==="Late US")),
+    buyOnly:metricSet(trades.filter(t=>t.direction==="BUY")),
+    sellOnly:metricSet(trades.filter(t=>t.direction==="SELL"))
+  };
+  const ordered=trades.filter(t=>t.r!==null).sort((a,b)=>a.signalTime.localeCompare(b.signalTime));
+  const split=Math.floor(ordered.length*0.7);
+  const chronological={
+    first70Percent:metricSet(ordered.slice(0,split)),
+    last30Percent:metricSet(ordered.slice(split)),
+    splitAt:ordered[split]?.signalTime||null,
+    note:"Chronological diagnostic only, not a clean out-of-sample test: trade outcomes can extend beyond the signal-time split and the variants are filtered subsets of the same baseline trades."
+  };
   return {
     strategy:"GD-MTF-1.0",symbol:"XAU/USD",interval:"5min",bars:candles.length,
     period:{from:new Date(candles[0].time).toISOString(),to:new Date(candles[candles.length-1].time+FIVE_MINUTES).toISOString()},
     assumptions:{signal:"Same GD-MTF-1.0 H1/M15/M5 conditions; M15 and H1 built from complete M5 bars",entry:"Signal M5 close; exits begin on next M5 candle",stopTarget:"ATR M5 stop at 1.5x ATR; target at 2R",sameCandle:"If stop and target both touch in one M5 candle, count as stop first",costs:"Spread, commission, slippage and swap NOT included; gross results only",sessions:"UTC hour buckets; not daylight-saving-adjusted London/New York exchange sessions"},
     summary:{signals:trades.length,closed:closed.length,open:trades.length-closed.length,wins:wins.length,losses:losses.length,winRate:closed.length?Number((100*wins.length/closed.length).toFixed(1)):null,totalR:Number(totalR.toFixed(2)),expectancyR:closed.length?Number((totalR/closed.length).toFixed(3)):null,profitFactor:grossLoss?Number((grossWin/grossLoss).toFixed(2)):null,maxDrawdownR:Number(maxDrawdown.toFixed(2))},
-    sessions,trades:trades.slice(-500)
+    sessions,directionBreakdown,variants,chronological,trades:trades.slice(-500)
   };
 }
